@@ -296,9 +296,11 @@ typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeed800Kbps> NeoEsp32Rmt800KbpsMethod;
 typedef NeoEsp32RmtMethodBase<NeoEsp32RmtSpeed400Kbps> NeoEsp32Rmt400KbpsMethod;
 
 /* define RMT method as the default method for ESP32 */
+/*
 typedef NeoEsp32RmtWs2813Method NeoWs2813Method;
 typedef NeoEsp32RmtSK6812Method NeoSK6812Method;
 typedef NeoEsp32Rmt800KbpsMethod Neo800KbpsMethod;
 typedef NeoEsp32Rmt400KbpsMethod Neo400KbpsMethod;
+*/
 
 #endif

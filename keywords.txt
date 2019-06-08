@@ -21,7 +21,6 @@ NeoRbgFeature	KEYWORD1
 DotStarBgrFeature	KEYWORD1
 DotStarLbgrFeature	KEYWORD1
 NeoWs2813Method	KEYWORD1
-NeoSK6812Method	KEYWORD1
 Neo800KbpsMethod	KEYWORD1
 Neo400KbpsMethod	KEYWORD1
 NeoAvrWs2813Method	KEYWORD1
