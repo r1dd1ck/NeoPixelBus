@@ -29,15 +29,10 @@ License along with NeoPixel.  If not, see
 
 #ifdef ARDUINO_ARCH_ESP32
 
-#ifndef ICACHE_RAM_ATTR
-#define ICACHE_RAM_ATTR IRAM_ATTR
-#endif
 
 extern "C"
 {
 #include <Arduino.h>
-#include <driver/gpio.h>
-#include <driver/periph_ctrl.h>
 #include <driver/rmt.h>
 }
 
@@ -109,18 +104,19 @@ public:
         _pin(pin)
     {
         _pixelsSize = pixelCount * elementSize;
-        _bufferSize = _pixelsSize + 1; // +1 for RESET pulse
 
         _pixels = (uint8_t*)malloc(_pixelsSize);
         memset(_pixels, 0x00, _pixelsSize);
 
-        _rmtBuffer = (uint8_t*)malloc(_bufferSize);
-        memset(_rmtBuffer, 0x00, _bufferSize);
+        _rmtBuffer = (uint8_t*)malloc(_pixelsSize);
     }
 
     ~NeoEsp32RmtMethodBase()
     {
-        StopRmt();
+        ESP_ERROR_CHECK(rmt_wait_tx_done(_channel, 5000 / portTICK_PERIOD_MS));
+
+        ESP_ERROR_CHECK(rmt_driver_uninstall(_channel));
+
         free(_pixels);
         free(_rmtBuffer);
     }
@@ -157,16 +153,12 @@ public:
         _rmtState = NeoRmtState_Idle;
     }
 
-    void ICACHE_RAM_ATTR Update()
+    void IRAM_ATTR Update()
     {
-      // wait for not actively sending data
-        while (!IsReadyToUpdate())
-        {
-            yield();
-        }
+        if (!IsReadyToUpdate()) return;
 
-        FillBuffers();
-        ESP_ERROR_CHECK(rmt_write_sample(_channel, _rmtBuffer, _bufferSize, false));
+        memcpy(_rmtBuffer, _pixels, _pixelsSize);
+        ESP_ERROR_CHECK(rmt_write_sample(_channel, _rmtBuffer, _pixelsSize, false));
 
         _rmtState = NeoRmtState_Sending;
     }
@@ -182,24 +174,24 @@ public:
     }
 
 private:
-    uint8_t* _pixels;       // holds LED color values
-    uint8_t* _rmtBuffer;    // holds a copy of '_pixels' (+1 for RESET), cloned on Update()
+    const uint8_t _pin;     // output pin number
 
-    size_t  _pixelsSize;    // size of '_pixels' array
-    size_t  _bufferSize;    // size of '_rmtBuffer' array
-    uint8_t _pin;           // output pin number
+    uint8_t* _pixels;       // holds LED color values
+    uint8_t* _rmtBuffer;    // holds a copy of '_pixels', cloned on Update()
+
+    size_t   _pixelsSize;   // size of '_pixels' array
 
     rmt_channel_t _channel; // RMT channel
 
     static const uint32_t _bit0 = (NS_TO_CYCLES(T_SPEED::T0H) | (1 << 15) | (NS_TO_CYCLES(T_SPEED::T0L) << 16));  // logical 0
     static const uint32_t _bit1 = (NS_TO_CYCLES(T_SPEED::T1H) | (1 << 15) | (NS_TO_CYCLES(T_SPEED::T1L) << 16));  // logical 1
-    static const uint32_t  _rst = (NS_TO_CYCLES(T_SPEED::ResetTimeUs*1000L));                                     // reset
+    static const uint16_t  _rst = (NS_TO_CYCLES(T_SPEED::ResetTimeUs*1000L));                                     // reset
 
     volatile NeoRmtState _rmtState;
 
 
     // translate routine (called from RMT ISR) -> sample_to_rmt_fn
-    static void ICACHE_RAM_ATTR u8_to_rmt(const void* src, rmt_item32_t* dest, size_t src_size, size_t wanted_num, size_t* translated_size, size_t* item_num)
+    static void IRAM_ATTR u8_to_rmt(const void* src, rmt_item32_t* dest, size_t src_size, size_t wanted_num, size_t* translated_size, size_t* item_num)
     {
         if (src == NULL || dest == NULL)
         {
@@ -215,45 +207,26 @@ private:
         uint8_t *psrc = (uint8_t *)src;
         rmt_item32_t* pdest = dest;
 
-        bool last = !(src_size > (wanted_num >> 3));
-        if (last)
-        {
-        	src_size--;
-        }
-
         while (size < src_size && num < wanted_num)
         {
             for (mask = 0x80; mask != 0; mask >>= 1)
             {
-                if (*psrc & mask)
-                {
-                    pdest->val = _bit1;
-                }
-                else
-                {
-                    pdest->val = _bit0;
-                }
-                num++;
+                pdest->val = (*psrc & mask) ? _bit1 : _bit0;
                 pdest++;
             }
+            num += 8;
             size++;
             psrc++;
         }
 
-        if (last)
+        if (!(src_size > (wanted_num >> 3)))
         {
-          pdest->val = _rst;
-          num++;
-          size++;
+          pdest--;
+          pdest->duration1 += _rst;
         }
 
         *translated_size = size;
         *item_num = num;
-    }
-
-    void FillBuffers()
-    {
-        memcpy(_rmtBuffer, _pixels, _pixelsSize);
     }
 
     void updateState()
@@ -261,11 +234,6 @@ private:
         uint32_t status;
         ESP_ERROR_CHECK(rmt_get_status(_channel, &status));
         _rmtState = (status & 0x1000000) ? NeoRmtState_Sending : NeoRmtState_Idle;
-    }
-
-    void StopRmt()
-    {
-        ESP_ERROR_CHECK(rmt_driver_uninstall(_channel));
     }
 
     esp_err_t get_channel_free(rmt_channel_t* channel)
